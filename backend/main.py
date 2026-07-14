@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from backend.api import audio_routes
 
 app = FastAPI(title="EchoMap API", version="0.1.0-alpha")
+
+app.include_router(audio_routes.router, prefix="/api/audio", tags=["audio"])
+
 
 app.add_middleware(
     CORSMiddleware,
