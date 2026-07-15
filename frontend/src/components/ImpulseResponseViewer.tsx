@@ -1,10 +1,10 @@
 import React, { useRef, useEffect } from 'react';
 
-interface WaveformViewerProps {
+interface ImpulseResponseViewerProps {
   data: number[];
 }
 
-export const WaveformViewer: React.FC<WaveformViewerProps> = ({ data }) => {
+export const ImpulseResponseViewer: React.FC<ImpulseResponseViewerProps> = ({ data }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -25,7 +25,7 @@ export const WaveformViewer: React.FC<WaveformViewerProps> = ({ data }) => {
     ctx.fillStyle = '#0c0e14';
     ctx.fillRect(0, 0, w, h);
 
-    // Grid — finer, more subtle
+    // Grid
     ctx.strokeStyle = 'rgba(42, 45, 56, 0.6)';
     ctx.lineWidth = 0.5;
     ctx.beginPath();
@@ -33,16 +33,7 @@ export const WaveformViewer: React.FC<WaveformViewerProps> = ({ data }) => {
     for (let y = 0; y < h; y += 20) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
     ctx.stroke();
 
-    // Center line
-    ctx.strokeStyle = 'rgba(58, 61, 72, 0.8)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, h / 2);
-    ctx.lineTo(w, h / 2);
-    ctx.stroke();
-
     if (!data || data.length === 0) {
-      // Empty state
       ctx.fillStyle = 'rgba(86, 90, 110, 0.4)';
       ctx.font = '10px Inter, sans-serif';
       ctx.textAlign = 'center';
@@ -50,19 +41,37 @@ export const WaveformViewer: React.FC<WaveformViewerProps> = ({ data }) => {
       return;
     }
 
-    // Glow effect
-    ctx.shadowColor = 'rgba(34, 211, 238, 0.3)';
-    ctx.shadowBlur = 6;
-    
-    // Waveform line
-    ctx.strokeStyle = '#22d3ee';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
+    const maxVal = Math.max(...data, 0.0001);
     const sliceWidth = w / data.length;
+
+    // Gradient fill under the curve
+    const gradient = ctx.createLinearGradient(0, 0, 0, h);
+    gradient.addColorStop(0, 'rgba(74, 222, 128, 0.35)');
+    gradient.addColorStop(0.6, 'rgba(74, 222, 128, 0.08)');
+    gradient.addColorStop(1, 'rgba(74, 222, 128, 0.0)');
+
+    ctx.beginPath();
+    ctx.moveTo(0, h);
     for (let i = 0; i < data.length; i++) {
       const x = i * sliceWidth;
-      const normalized = (data[i] + 1) / 2.0;
-      const y = (1 - normalized) * h;
+      const normalized = data[i] / maxVal;
+      ctx.lineTo(x, h - (normalized * h));
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Stroke line on top with glow
+    ctx.shadowColor = 'rgba(74, 222, 128, 0.4)';
+    ctx.shadowBlur = 5;
+    ctx.strokeStyle = '#4ade80';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < data.length; i++) {
+      const x = i * sliceWidth;
+      const normalized = data[i] / maxVal;
+      const y = h - (normalized * h);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }

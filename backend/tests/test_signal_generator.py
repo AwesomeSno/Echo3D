@@ -1,5 +1,5 @@
 import numpy as np
-from backend.signal_processing.generator import SignalGenerator
+from signal_processing.generator import SignalGenerator
 
 def test_linear_chirp_duration():
     fs = 48000

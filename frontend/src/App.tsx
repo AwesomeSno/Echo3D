@@ -1,15 +1,23 @@
 import { useState } from 'react'
 import { AudioControlPanel } from './components/AudioControlPanel'
 import { WaveformViewer } from './components/WaveformViewer'
+import { ImpulseResponseViewer } from './components/ImpulseResponseViewer'
+import { EchoList, type Echo } from './components/EchoList'
+import { SpatialReconstructionViewer, type Scan } from './components/SpatialReconstructionViewer'
 
 function App() {
   const [waveform, setWaveform] = useState<number[]>([])
+  const [impulseResponse, setImpulseResponse] = useState<number[]>([])
+  const [scans, setScans] = useState<Scan[]>([])
+  const [nextScanId, setNextScanId] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<string>('SYSTEM STANDBY')
 
-  const handlePing = async (pingData: any) => {
+  const handlePing = async (pingData: any, position: [number, number, number]) => {
     setIsLoading(true)
     setError(null)
+    setStatus('ACQUIRING SIGNAL...')
     try {
       const response = await fetch('http://localhost:8000/api/audio/ping', {
         method: 'POST',
@@ -17,62 +25,162 @@ function App() {
         body: JSON.stringify(pingData)
       })
 
-      if (!response.ok) {
-        throw new Error(`Error: ${response.statusText}`)
-      }
-
       const data = await response.json()
-      if (data.ui_waveform) {
+      if (data.status === 'success') {
+        const mappedEchoes = (data.echoes || []).map((e: any) => ({
+          distance: e.distance_m,
+          tof: e.time_of_flight_s * 1000,
+          strength: e.amplitude,
+          type: e.is_direct_path ? 'DIRECT' : 'REFLECTION'
+        }));
         setWaveform(data.ui_waveform)
+        setImpulseResponse(data.ui_impulse_response || [])
+        setScans(prev => [...prev, { id: nextScanId, position, echoes: mappedEchoes }])
+        setNextScanId(prev => prev + 1)
+        setStatus(`COMPLETE · ${data.total_samples.toLocaleString()} SAMPLES @ ${(data.sample_rate / 1000).toFixed(0)}kHz`)
+      } else {
+        setError(data.detail || 'Unknown processing error')
+        setStatus('CONNECTION FAILURE')
       }
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error')
+      setStatus('CONNECTION FAILURE')
     } finally {
       setIsLoading(false)
     }
   }
 
+  const handleResetScans = () => {
+    setScans([])
+    setNextScanId(1)
+    setWaveform([])
+    setImpulseResponse([])
+    setError(null)
+    setStatus('SYSTEM STANDBY')
+  }
+
+  const allHistoricalEchoes = scans.flatMap(scan => 
+    scan.echoes.map(echo => ({ ...echo, scanId: scan.id }))
+  )
+
+  const reflectionCount = allHistoricalEchoes.filter(e => e.type === 'REFLECTION').length
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex">
-      {/* Sidebar / Settings Panel */}
-      <div className="w-80 bg-gray-950 p-6 flex flex-col border-r border-gray-800 h-screen overflow-y-auto">
-        <h1 className="text-3xl font-black mb-8 bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">EchoMap</h1>
+    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex" style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+      
+      {/* ─── Sidebar ─── */}
+      <div className="w-[300px] min-w-[300px] bg-[var(--bg-secondary)] border-r border-[var(--border)] flex flex-col h-screen sticky top-0">
         
-        <AudioControlPanel onPing={handlePing} isLoading={isLoading} />
-        
-        {error && (
-          <div className="mt-4 p-4 bg-red-900/50 border border-red-700 rounded text-red-200 text-sm">
-            {error}
+        {/* Logo Header */}
+        <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-2 h-2 rounded-full bg-[var(--accent)]" style={{ boxShadow: '0 0 8px rgba(59,130,246,0.5)' }}></div>
+            <h1 className="text-[13px] font-semibold tracking-[0.15em] text-white uppercase">EchoMap</h1>
           </div>
-        )}
+          <span className="text-[9px] text-[var(--text-dim)] tracking-wider px-1.5 py-0.5 border border-[var(--border)] rounded">v2.0</span>
+        </div>
+
+        {/* Controls */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <AudioControlPanel onPing={handlePing} onResetScans={handleResetScans} isLoading={isLoading} />
+          {error && (
+            <div className="mt-4 p-3 bg-[#1a0505] border border-[var(--error)]/30 rounded-md">
+              <div className="text-[10px] font-semibold text-[var(--error)] uppercase tracking-wider mb-1">⚠ Error</div>
+              <div className="text-[11px] text-[#ff9999] leading-relaxed">{error}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Status */}
+        <div className="px-5 py-3 border-t border-[var(--border)] bg-[var(--bg-primary)]">
+          <div className="flex items-center gap-2">
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              status.includes('FAILURE') ? 'bg-[var(--error)]' : 
+              status.includes('STANDBY') ? 'bg-[var(--warning)]' : 
+              status.includes('ACQUIRING') ? 'bg-[var(--accent)] blink' : 'bg-[var(--success)]'
+            }`}></div>
+            <span className={`text-[10px] tracking-wide ${
+              status.includes('FAILURE') ? 'text-[var(--error)]' : 
+              status.includes('STANDBY') ? 'text-[var(--text-dim)]' : 'text-[var(--text-secondary)]'
+            }`}>{status}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 p-8 flex flex-col">
-        <div className="mb-8 flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-gray-100">Live Dashboard</h2>
-          <div className="flex items-center space-x-2">
-            <div className={`w-3 h-3 rounded-full ${isLoading ? 'bg-cyan-400 animate-pulse' : 'bg-gray-600'}`}></div>
-            <span className="text-sm text-gray-400 font-medium tracking-wide">
-              {isLoading ? 'RECORDING' : 'IDLE'}
-            </span>
+      {/* ─── Main Content ─── */}
+      <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)]">
+        <div className="max-w-7xl mx-auto p-6 space-y-5">
+          
+          {/* Top Bar */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-[15px] font-semibold text-white tracking-wide">Acoustic SLAM Interface</h2>
+              <p className="text-[10px] text-[var(--text-dim)] tracking-wider mt-0.5">SIMULTANEOUS LOCALIZATION & MAPPING</p>
+            </div>
+            <div className="flex items-center gap-4 text-[10px] text-[var(--text-dim)] tracking-wider">
+              <span>{scans.length} SCAN{scans.length !== 1 ? 'S' : ''}</span>
+              <span className="text-[var(--border)]">│</span>
+              <span>{reflectionCount} REFLECTION{reflectionCount !== 1 ? 'S' : ''}</span>
+            </div>
           </div>
-        </div>
-        
-        {/* Top Waveform View */}
-        <div className="mb-8">
-          <WaveformViewer data={waveform} />
-        </div>
 
-        {/* 3D Viewport Placeholder for Phase 4 */}
-        <div className="flex-1 bg-gray-800 rounded border border-gray-700 shadow-inner flex items-center justify-center relative overflow-hidden">
-          <div className="text-center">
-            <svg className="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-            </svg>
-            <p className="text-gray-500 font-medium tracking-wider">3D RECONSTRUCTION</p>
-            <p className="text-gray-600 text-sm mt-2">Available in Phase 4</p>
+          {/* Signal Viewers — Side-by-Side */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-3 rounded-full bg-[var(--cyan)]"></div>
+                  <h3 className="text-[10px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">Raw Recording Buffer</h3>
+                </div>
+                <span className="text-[9px] text-[var(--text-dim)]">{waveform.length > 0 ? `${waveform.length} pts` : '—'}</span>
+              </div>
+              <div className="p-3">
+                <WaveformViewer data={waveform} />
+              </div>
+            </div>
+
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-3 rounded-full bg-[var(--green-signal)]"></div>
+                  <h3 className="text-[10px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">Hilbert Envelope</h3>
+                </div>
+                <span className="text-[9px] text-[var(--text-dim)]">{impulseResponse.length > 0 ? `${impulseResponse.length} pts` : '—'}</span>
+              </div>
+              <div className="p-3">
+                <ImpulseResponseViewer data={impulseResponse} />
+              </div>
+            </div>
           </div>
+
+          {/* 3D Viewport */}
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-3 rounded-full bg-[var(--purple-signal)]"></div>
+                <h3 className="text-[10px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">3D Triangulation Viewport</h3>
+              </div>
+              <div className="flex items-center gap-3 text-[9px] text-[var(--text-dim)]">
+                <span>ORBIT · PAN · ZOOM</span>
+              </div>
+            </div>
+            <SpatialReconstructionViewer scans={scans} />
+          </div>
+
+          {/* Data Table */}
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-3 rounded-full bg-[var(--text-dim)]"></div>
+                <h3 className="text-[10px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">Accumulated Data Log</h3>
+              </div>
+              <span className="text-[10px] text-[var(--accent)] font-medium">{allHistoricalEchoes.length} entries</span>
+            </div>
+            <div className="p-4">
+              <EchoList echoes={allHistoricalEchoes} />
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

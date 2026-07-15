@@ -1,6 +1,8 @@
-fastapi
-uvicorn
+fastapi==0.110.1
+uvicorn==0.29.0
+noisereduce==3.0.2
 numpy
 scipy
 sounddevice
 pydantic
+noisereduce==3.0.2
